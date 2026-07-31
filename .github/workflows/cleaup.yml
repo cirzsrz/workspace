@@ -30,13 +30,14 @@ jobs:
       - name: Remove Non-Citrus Defconfigs
         run: |
           cd kernel/arch/arm64/configs
-          ls | grep -v -E "^citrus" | xargs rm -f
+          find . -maxdepth 1 -type f ! -name "citrus*" -delete
           ls -la
 
       - name: Remove Non-Citrus Device Trees
         run: |
           cd kernel/arch/arm64/boot/dts/qcom
           find . -type f \( -name "*lime*" -o -name "*redmi*" -o -name "*note9*" \) -delete
+          find . -type d -name "*lime*" -empty -delete 2>/dev/null || true
           find . -type f -name "*citrus*" | sort
 
       - name: Remove Leftover Lime References
