@@ -6,6 +6,7 @@ on:
       source_repo_url:
         description: "Source Repo URL"
         required: true
+        default: "https://github.com/MiCode/Xiaomi_Kernel_OpenSource"
         type: string
       source_branch:
         description: "Source Branch"
