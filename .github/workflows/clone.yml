@@ -12,7 +12,7 @@ on:
         description: "Source Branch"
         required: true
         type: string
-      target_repo_name:
+      target_repo:
         description: "Target Repo"
         required: true
         type: string
@@ -22,7 +22,7 @@ on:
         default: "main"
         type: string
       shallow_mode:
-        description: "Shallow Clone"
+        description: "Shallow Clone (faster, less history)"
         required: false
         default: false
         type: boolean
@@ -30,6 +30,15 @@ on:
         description: "Shallow Depth"
         required: false
         default: "1"
+        type: string
+      reset_history:
+        description: "Remove .git & create ONE fresh commit"
+        required: false
+        default: false
+        type: boolean
+      initial_commit_message:
+        description: "commit message (if reset_history = true)"
+        required: false
         type: string
       git_user_name:
         description: "Commit Author Name"
@@ -86,12 +95,26 @@ jobs:
           echo "HEAD: $(git log -1 --oneline)"
           echo "Commits: $(git rev-list --count HEAD 2>/dev/null || echo 'N/A (shallow)')"
 
+      - name: Reset History (Optional)
+        if: github.event.inputs.reset_history == 'true'
+        run: |
+          cd source
+          echo "🧹 Removing existing .git history..."
+          rm -rf .git
+          echo "🔄 Initializing fresh Git repository..."
+          git init
+          git config user.name "${{ github.event.inputs.git_user_name }}"
+          git config user.email "${{ github.event.inputs.git_user_email }}"
+          git add .
+          git commit -m "${{ github.event.inputs.initial_commit_message }}"
+          echo "✅ History reset. New commit: $(git log -1 --oneline)"
+
       - name: Push to Target
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
           cd source
-          TARGET_REPO="${{ github.event.inputs.target_repo_name }}"
+          TARGET_REPO="${{ github.event.inputs.target_repo }}"
           TARGET_URL="${TARGET_BASE}${TARGET_REPO}.git"
           AUTH_URL=$(echo "$TARGET_URL" | \
             sed "s|https://|https://${{ github.event.inputs.git_user_name }}:${GH_TOKEN}@|")
@@ -106,4 +129,3 @@ jobs:
           echo ""
           echo "✅ Done"
           echo "🔗 ${TARGET_BASE}${TARGET_REPO}/tree/${{ github.event.inputs.target_branch }}"
-          
