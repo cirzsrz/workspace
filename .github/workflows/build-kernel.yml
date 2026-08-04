@@ -1,7 +1,7 @@
-name: Build Kernel & Release
+name: Build Kernel & Release (Optimized with APT Cache)
 
 on:
-  workflow_dispatch:   # manual trigger
+  workflow_dispatch:
     inputs:
       version_tag:
         description: 'Release tag (e.g., v4.19.98-citrus)'
@@ -20,23 +20,32 @@ jobs:
       KERNEL_BRANCH: "chisa"
 
     steps:
-      # 1. Clone the kernel repo (shallow) – using token for auth
+      # 1. Cache APT packages (speeds up dependency installation)
+      - name: Cache APT packages
+        uses: actions/cache@v3
+        with:
+          path: /var/cache/apt/archives
+          key: apt-${{ runner.os }}-${{ hashFiles('dependencies.txt') }}
+          restore-keys: |
+            apt-${{ runner.os }}-
+
+      # 2. Clone the kernel repo (shallow)
       - name: Clone Kernel Source (shallow)
         run: |
           git clone --depth 1 --branch $KERNEL_BRANCH \
             https://${{ github.actor }}:${{ secrets.GH_TOKEN }}@github.com/$KERNEL_REPO.git kernel
 
-      # 2. Install dependencies
+      # 3. Install dependencies (uses cached APT packages)
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get install -y --no-install-recommends \
             bc bison build-essential ccache cpio flex \
             gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
             git libelf-dev libssl-dev lz4 lzop make \
             ncurses-dev rsync unzip
 
-      # 3. Cache Proton-Clang toolchain
+      # 4. Cache Proton-Clang toolchain
       - name: Cache Proton-Clang
         id: cache-toolchain
         uses: actions/cache@v3
@@ -49,7 +58,7 @@ jobs:
         run: |
           git clone --depth=1 https://github.com/kdrag0n/proton-clang.git toolchain
 
-      # 4. Setup ccache
+      # 5. Setup ccache
       - name: Setup ccache
         uses: actions/cache@v3
         with:
@@ -63,7 +72,7 @@ jobs:
           mkdir -p ~/.ccache
           echo "max_size = 2G" >> ~/.ccache/ccache.conf
 
-      # 5. Build the kernel
+      # 6. Build the kernel
       - name: Build Kernel
         working-directory: kernel
         env:
@@ -76,7 +85,6 @@ jobs:
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           export CLANG_TRIPLE=aarch64-linux-gnu-
 
-          # Update defconfig path if needed – check your kernel tree
           make O=out ARCH=arm64 SUBARCH=arm64 \
                CC="ccache clang" LD=ld.lld AR=llvm-ar NM=llvm-nm \
                OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
@@ -87,25 +95,19 @@ jobs:
                OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
                -j$(nproc)
 
-      # 6. Create GitHub Release and upload artifacts
+      # 7. Create Release and upload artifacts
       - name: Create Release and Upload Assets
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
-          # Find the kernel image
           KERNEL_IMAGE="kernel/out/arch/arm64/boot/Image.gz-dtb"
           if [ ! -f "$KERNEL_IMAGE" ]; then
             echo "❌ Kernel image not found!"
             exit 1
           fi
 
-          # Optionally also build dtbo.img if needed
-          # (Add a step to build dtbo.img if you want)
-
-          # Create a release on the kernel repo
           gh release create "${{ github.event.inputs.version_tag }}" \
             --repo "$KERNEL_REPO" \
             --title "${{ github.event.inputs.release_title }}" \
             --notes "Built from branch $KERNEL_BRANCH" \
-            "$KERNEL_IMAGE" \
-            # Add dtbo.img if it exists: kernel/out/arch/arm64/boot/dtbo.img
+            "$KERNEL_IMAGE"
