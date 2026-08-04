@@ -1,4 +1,4 @@
-name: Build Kernel & Release (Optimized with APT Cache)
+name: Build Kernel & Release (Optimized)
 
 on:
   workflow_dispatch:
@@ -20,14 +20,12 @@ jobs:
       KERNEL_BRANCH: "chisa"
 
     steps:
-      # 1. Cache APT packages (speeds up dependency installation)
+      # 1. Cache APT packages (static key, reliable)
       - name: Cache APT packages
         uses: actions/cache@v3
         with:
           path: /var/cache/apt/archives
-          key: apt-${{ runner.os }}-${{ hashFiles('dependencies.txt') }}
-          restore-keys: |
-            apt-${{ runner.os }}-
+          key: apt-ubuntu-22.04-kernel-v1
 
       # 2. Clone the kernel repo (shallow)
       - name: Clone Kernel Source (shallow)
@@ -72,7 +70,7 @@ jobs:
           mkdir -p ~/.ccache
           echo "max_size = 2G" >> ~/.ccache/ccache.conf
 
-      # 6. Build the kernel
+      # 6. Build the kernel (with assembler fix)
       - name: Build Kernel
         working-directory: kernel
         env:
@@ -80,19 +78,35 @@ jobs:
           SUBARCH: arm64
           CCACHE_DIR: ~/.ccache
         run: |
-          export PATH="$PWD/../toolchain/bin:/usr/lib/ccache:$PATH"
+          export TOOLCHAIN="$PWD/../toolchain"
+          # Keep ccache in PATH but do NOT put toolchain/bin at the front
+          export PATH="/usr/lib/ccache:$PATH"
+
+          # Use toolchain binaries by absolute path
+          CLANG_BIN="$TOOLCHAIN/bin/clang"
+          LLD_BIN="$TOOLCHAIN/bin/ld.lld"
+          LLVM_AR="$TOOLCHAIN/bin/llvm-ar"
+          LLVM_NM="$TOOLCHAIN/bin/llvm-nm"
+          LLVM_OBJCOPY="$TOOLCHAIN/bin/llvm-objcopy"
+          LLVM_OBJDUMP="$TOOLCHAIN/bin/llvm-objdump"
+          LLVM_STRIP="$TOOLCHAIN/bin/llvm-strip"
+
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           export CLANG_TRIPLE=aarch64-linux-gnu-
+          # Force host tools to use the system compiler
+          export HOSTCC=gcc
 
+          # Generate defconfig
           make O=out ARCH=arm64 SUBARCH=arm64 \
-               CC="ccache clang" LD=ld.lld AR=llvm-ar NM=llvm-nm \
-               OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
-               vendor/citrus-perf_defconfig
+               CC="ccache $CLANG_BIN" LD="$LLD_BIN" AR="$LLVM_AR" NM="$LLVM_NM" \
+               OBJCOPY="$LLVM_OBJCOPY" OBJDUMP="$LLVM_OBJDUMP" STRIP="$LLVM_STRIP" \
+               vendor/citrus_perf_defconfig
 
+          # Build the kernel
           make O=out ARCH=arm64 SUBARCH=arm64 \
-               CC="ccache clang" LD=ld.lld AR=llvm-ar NM=llvm-nm \
-               OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
+               CC="ccache $CLANG_BIN" LD="$LLD_BIN" AR="$LLVM_AR" NM="$LLVM_NM" \
+               OBJCOPY="$LLVM_OBJCOPY" OBJDUMP="$LLVM_OBJDUMP" STRIP="$LLVM_STRIP" \
                -j$(nproc)
 
       # 7. Create Release and upload artifacts
